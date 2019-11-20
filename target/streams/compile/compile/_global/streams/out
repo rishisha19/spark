@@ -1,4 +1,0 @@
-[0m[[0m[33mwarn[0m] [0m[0m/Users/rissharm5/projects/personal/spark-kafka-stream/src/main/scala/config/Config.scala:3:29: imported `Config' is permanently hidden by definition of object Config in package config[0m
-[0m[[0m[33mwarn[0m] [0m[0mimport com.typesafe.config.{Config, ConfigFactory}[0m
-[0m[[0m[33mwarn[0m] [0m[0m                            ^[0m
-[0m[[0m[33mwarn[0m] [0m[0mone warning found[0m
