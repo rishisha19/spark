@@ -1,0 +1,16 @@
+User(1495122743407,User_8,Region_2,MALE)
+User(1497365740258,User_4,Region_9,MALE)
+User(1497365740258,User_4,Region_9,MALE)
+User(1497365740258,User_4,Region_9,MALE)
+User(1492081333345,User_2,Region_9,MALE)
+User(1491712981144,User_6,Region_9,OTHER)
+User(1491712981144,User_6,Region_9,OTHER)
+
+
+PageViews(551921,User_8,Page_75)
+PageViews(551811,User_4,Page_53)
+PageViews(551901,User_4,Page_22)
+PageViews(551971,User_4,Page_98)
+PageViews(551931,User_2,Page_27)
+PageViews(551861,User_6,Page_42)
+PageViews(551891,User_6,Page_25)
