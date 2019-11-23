@@ -16,8 +16,8 @@ object StreamingApp {
     val kafkaParams = Map[String, Object](
       "bootstrap.servers" -> Config.kafkaServerAddress,
       "group.id" -> "stream_group",
-      "auto.offset.reset" -> "latest",
-      "enable.auto.commit" -> (false: java.lang.Boolean)
+      "auto.offset.reset" -> "earliest",
+      "enable.auto.commit" -> (true: java.lang.Boolean)
     )
 
     val producer = KafkaClient.getJsonKafkaProducer(
@@ -40,29 +40,37 @@ object StreamingApp {
       .countByValue().map(a => (a._1._1, a._2))
 
     val viewTimeBasedOnPageidAndGenderStream = userAndPgeViewWindowedStream.map(a => (a._1, a._2._2))
-      .reduceByKey(_ + _).map(a => a)
-
+      .reduceByKey(_ + _)
+    producer.initTransactions()
     viewTimeBasedOnPageidAndGenderStream.join(distinctUserForPageStream).groupByKey()
       .window(Minutes(1), Seconds(10))
       .map(r => (r._1,r._2.foldLeft((0L, 0L)) { case ((accA, accB), (a, b)) => (accA + a, accB + b) }))
       .map(r => TopViews(r._1._1, r._1._2, r._2._1, r._2._2))
-      .foreachRDD( rdd =>
-        rdd.sortBy(_.viewtime, ascending = false).take(10)
-        .foreach(topViews => {
+      .foreachRDD( rdd => {
 
-          producer.send(new ProducerRecord(Config.topPagesTopic, topViews.pageid, topViews), new Callback {
-            override def onCompletion(metadata: RecordMetadata, exception: Exception): Unit = {
-              if (null == exception)
-                println("published to kafka")
-              else
-                exception.printStackTrace()
-            }
-          })})
-    )
+        producer.beginTransaction()
+        rdd.sortBy(_.viewtime, ascending = false).take(10)
+          .foreach(topViews => {
+
+            producer.send(new ProducerRecord(Config.topPagesTopic, topViews.pageid, topViews), new Callback {
+              override def onCompletion(metadata: RecordMetadata, exception: Exception): Unit = {
+                if (null == exception)
+                  println("published to kafka")
+                else {
+                  exception.printStackTrace()
+                  producer.abortTransaction()
+                }
+
+              }
+            })
+          })
+        producer.commitTransaction()
+      })
     KafkaClient.start()
 
     try {
       KafkaClient.awaitTermination()
+      producer.close()
       println("*** streaming terminated")
     } catch {
       case e: Exception => {

@@ -19,7 +19,15 @@ libraryDependencies ++= Seq(
   "org.apache.spark"      %% "spark-sql"      % sparkVersion,
   "org.apache.spark"      %% "spark-sql-kafka-0-10"             % sparkVersion      % "provided",
   "org.apache.spark"      %% "spark-streaming"                  % sparkVersion      % "provided",
-  "org.apache.spark"      %% "spark-streaming-kafka-0-10"       % sparkVersion
+  "org.apache.spark"      %% "spark-streaming-kafka-0-10"       % sparkVersion,
+  "org.apache.flink"      %% "flink-streaming-scala"            % "1.9.1",
+  "org.apache.flink"      %% "flink-connector-kafka-0.10"       % "1.9.1",
+  "org.apache.flink"      %% "flink-table-api-scala-bridge"     % "1.9.1",
+  "org.apache.flink"      %% "flink-table-api-scala"            % "1.9.1",
+  "org.apache.flink"      % "flink-table-common"                % "1.9.1"           % "provided",
+  "org.apache.flink"      %% "flink-sql-connector-kafka-0.10"   % "1.9.1",
+  "org.apache.flink"      %% "flink-table-planner"              % "1.9.1"           % "provided",
+  "org.apache.flink"      %% "flink-table-planner-blink"        % "1.9.1"
 )
 
 
