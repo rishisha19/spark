@@ -1,18 +1,26 @@
+import java.lang
 import java.util.Properties
 
 import config.Config
-import model.{PageViews, TopViews, User}
+import model.{PageViews, TopViews, User, Views}
 import org.apache.flink.api.common.functions.{JoinFunction, ReduceFunction, RichFlatMapFunction}
 import org.apache.flink.api.common.serialization.SimpleStringSchema
 import org.apache.flink.streaming.api.TimeCharacteristic
+import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction
 import org.apache.flink.streaming.api.scala._
-import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
+import org.apache.flink.streaming.api.scala.function.RichProcessWindowFunction
+import org.apache.flink.streaming.api.windowing.assigners.{SlidingEventTimeWindows, TumblingEventTimeWindows}
+import org.apache.flink.streaming.api.windowing.evictors.TimeEvictor
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer010
-import org.apache.flink.table.api.EnvironmentSettings
+import org.apache.flink.table.api.{EnvironmentSettings, Tumble}
 import org.apache.flink.table.api.scala.StreamTableEnvironment
 import org.apache.flink.util.Collector
 import serde.{PageViewsSerDe, UserSerDe}
+import org.apache.flink.table.api.scala._
+import org.apache.spark.sql.catalyst.expressions.TimeWindow
+
+import scala.collection.mutable
 
 object FlinkStreamingApp {
 
@@ -42,28 +50,33 @@ object FlinkStreamingApp {
       .map(raw => PageViewsSerDe.deser.deserialize(raw.getBytes))
       .keyBy(_.userid)
 
-    userstream.join(viewstream).where(_.userid).equalTo(_.userid)
-      .window(TumblingEventTimeWindows.of(Time.seconds(60)))
-      .apply(new JoinFunction[User, PageViews, PageViews]() {
-        override def join(user: User, page: PageViews): PageViews = {
-          PageViews(page.viewtime, page.userid, page.pageid, None, None, Option(user.gender))
+    val resultStream = userstream.join(viewstream).where(_.userid).equalTo(_.userid)
+      .window(SlidingEventTimeWindows.of(Time.minutes(1), Time.seconds(10)))
+      .apply(new JoinFunction[User, PageViews, Views]() {
+        override def join(user: User, page: PageViews): Views = {
+          Views(page.viewtime, page.userid, page.pageid, 0, mutable.Set.empty[String], user.gender)
         }
       })
-      .keyBy(key => {
-        key.pageid + ":" + key.gender.get
-      })
-      .reduce(new ReduceFunction[PageViews] {
-        override def reduce(t: PageViews, t1: PageViews): PageViews = {
+      .keyBy("pageid", "gender")
+      .reduce(new ReduceFunction[Views] {
+        override def reduce(t: Views, t1: Views): Views = {
           val value: Long = t.viewtime + t1.viewtime
-          PageViews(t.viewtime, t.userid, t.pageid, Option(value), Option(t.userid + "_" + t1.userid), t.gender)
+          t.users.add(t1.userid)
+          Views(t.viewtime, t.userid, t.pageid, value, t.users, t.gender)
         }
-      }).flatMap(new RichFlatMapFunction[PageViews, TopViews] {
-      override def flatMap(page: PageViews, out: Collector[TopViews]): Unit = {
+      }).flatMap(new RichFlatMapFunction[Views, TopViews] {
+      override def flatMap(page: Views, out: Collector[TopViews]): Unit = {
         val usercount = (page.userid.split("_").toSet[String]).size
-        out.collect(new TopViews(page.pageid, page.gender.get, page.sum.get, usercount))
+
+        out.collect( TopViews(page.pageid, page.gender, page.sum, page.users.size))
       }
     })
-      .print()
+        .keyBy("pageid", "gender")
+        .window(TumblingEventTimeWindows.of(Time.minutes(1)))
+        .evictor(TimeEvictor.of(Time.seconds(30)))
+      .max("viewtime")
+        .print()
+
 
     /*val joinedWindowStream = env.addSource(pageViewsKafkaConsumer).name("page")
       .map(raw => PageViewsSerDe.deser.deserialize(raw.getBytes))
