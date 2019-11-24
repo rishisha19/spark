@@ -1,18 +1,18 @@
 import java.util.Properties
 
 import config.Config
-import model.TopViews
+import model.{PageViews, TopViews, User}
+import org.apache.flink.api.common.functions.{JoinFunction, ReduceFunction, RichFlatMapFunction}
 import org.apache.flink.api.common.serialization.SimpleStringSchema
-import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.streaming.api.TimeCharacteristic
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer010
-import org.apache.flink.table.api.{EnvironmentSettings, GroupWindow, Tumble}
+import org.apache.flink.table.api.EnvironmentSettings
 import org.apache.flink.table.api.scala.StreamTableEnvironment
+import org.apache.flink.util.Collector
 import serde.{PageViewsSerDe, UserSerDe}
-import org.apache.flink.table.api.scala._
 
 object FlinkStreamingApp {
 
@@ -20,8 +20,8 @@ object FlinkStreamingApp {
 
     val properties = new Properties()
     properties.setProperty("bootstrap.servers", Config.kafkaServerAddress)
-   // properties.setProperty("zookeeper.connect", "***.**.*.***:2181")
-    properties.setProperty("group.id","stream_group")
+    // properties.setProperty("zookeeper.connect", "***.**.*.***:2181")
+    properties.setProperty("group.id", "stream_group")
     properties.setProperty("auto.offset.reset", "earliest")
 
     val userKafkaConsumer = new FlinkKafkaConsumer010(Config.usersTopic, new SimpleStringSchema(),
@@ -36,8 +36,36 @@ object FlinkStreamingApp {
 
     val userstream = env.addSource(userKafkaConsumer).name("user")
       .map(raw => UserSerDe.deser.deserialize(raw.getBytes))
+      .keyBy(_.userid)
 
-    val joinedWindowStream = env.addSource(pageViewsKafkaConsumer).name("page")
+    val viewstream = env.addSource(pageViewsKafkaConsumer).name("page")
+      .map(raw => PageViewsSerDe.deser.deserialize(raw.getBytes))
+      .keyBy(_.userid)
+
+    userstream.join(viewstream).where(_.userid).equalTo(_.userid)
+      .window(TumblingEventTimeWindows.of(Time.seconds(60)))
+      .apply(new JoinFunction[User, PageViews, PageViews]() {
+        override def join(user: User, page: PageViews): PageViews = {
+          PageViews(page.viewtime, page.userid, page.pageid, None, None, Option(user.gender))
+        }
+      })
+      .keyBy(key => {
+        key.pageid + ":" + key.gender.get
+      })
+      .reduce(new ReduceFunction[PageViews] {
+        override def reduce(t: PageViews, t1: PageViews): PageViews = {
+          val value: Long = t.viewtime + t1.viewtime
+          PageViews(t.viewtime, t.userid, t.pageid, Option(value), Option(t.userid + "_" + t1.userid), t.gender)
+        }
+      }).flatMap(new RichFlatMapFunction[PageViews, TopViews] {
+      override def flatMap(page: PageViews, out: Collector[TopViews]): Unit = {
+        val usercount = (page.userid.split("_").toSet[String]).size
+        out.collect(new TopViews(page.pageid, page.gender.get, page.sum.get, usercount))
+      }
+    })
+      .print()
+
+    /*val joinedWindowStream = env.addSource(pageViewsKafkaConsumer).name("page")
       .map(raw => PageViewsSerDe.deser.deserialize(raw.getBytes))
       .join(userstream)
       .where(_.userid).equalTo(_.userid)
@@ -80,7 +108,7 @@ object FlinkStreamingApp {
 
     result.toAppendStream(TypeInformation.of(classOf[TopViews])).print()
 
-   /* val viewstream = CepEnvironment.env.addSource(kafkaConsumer2).name("view")
+    val viewstream = CepEnvironment.env.addSource(kafkaConsumer2).name("view")
       .assignTimestampsAndWatermarks(extractor).flatMap().keyBy(_.get("userid").asText()).window(TumblingEventTimeWindows.of(Time.seconds(60)))
       .reduce(new ReduceFunction[ObjectNode] {
         override def reduce(t: ObjectNode, t1: ObjectNode): ObjectNode = {
