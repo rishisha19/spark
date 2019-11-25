@@ -22,7 +22,8 @@ object StreamingApp {
 
     val producer = KafkaClient.getJsonKafkaProducer(
       kafkaParams + (ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG -> classOf[StringSerializer],
-        ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG -> classOf[TopViewsSerDe]))
+        ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG -> classOf[TopViewsSerDe], ProducerConfig
+        .TRANSACTIONAL_ID_CONFIG -> "stream-id-1"))
 
 
     val rawUserDataStream = KafkaClient.consumeJsonDataStream[User](Config.usersTopic,
@@ -47,8 +48,8 @@ object StreamingApp {
       .map(r => (r._1,r._2.foldLeft((0L, 0L)) { case ((accA, accB), (a, b)) => (accA + a, accB + b) }))
       .map(r => TopViews(r._1._1, r._1._2, r._2._1, r._2._2))
       .foreachRDD( rdd => {
-
         producer.beginTransaction()
+        println("##########################################S")
         rdd.sortBy(_.viewtime, ascending = false).take(10)
           .foreach(topViews => {
 
@@ -60,10 +61,10 @@ object StreamingApp {
                   exception.printStackTrace()
                   producer.abortTransaction()
                 }
-
               }
             })
           })
+        println("##########################################S")
         producer.commitTransaction()
       })
     KafkaClient.start()
